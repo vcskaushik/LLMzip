@@ -1,0 +1,9 @@
+torch
+torchvision
+torchaudio
+fairscale
+fire
+sentencepiece
+pandas
+matplotlib
+scipy
