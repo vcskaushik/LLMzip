@@ -7,6 +7,9 @@ This repository contains the code for our paper [LLMZip: Lossless Text Compressi
 
 This repository is identical to the [LLaMA repository] (https://github.com/facebookresearch/llama) with additional scripts to perform compression. The setup is identical to that of LLaMA. LLaMA Setup is included below for ease of access
 
+### Arithmetic Coding
+The arithmetic coding implementation is from [Deep Zip](https://github.com/mohit1997/DeepZip) repo , which is based of the implementation by [Project Nayuki](https://github.com/nayuki/Reference-arithmetic-coding)
+
 # Llama Setup
 
 In order to download the checkpoints and tokenizer, fill this [google form](https://forms.gle/jk851eBVbX1m5TAv5)
