@@ -12,7 +12,7 @@ This repository is identical to the [LLaMA repository] (https://github.com/faceb
 The code below can be used for compressing any text file ($TEXT_FILE) using LLaMa and Arithmetic Coding , the resulting compressed file will be stored in a specified folder ($COMPRESSION_FOLDER). $TARGET_FOLDER is the folder with LLaMa weights and tokenizer.
 
 ```
-torchrun --nproc_per_node 1 LLMzip_run.py --ckpt_dir $TARGET_FOLDER/model_size --tokenizer_path $TARGET_FOLDER/tokenizer.model --win_len 511 --text_file $TEXT_FILE --compression_folder $COMPRESSION_FOLDER --decode 0
+torchrun --nproc_per_node 1 LLMzip_run.py --ckpt_dir $TARGET_FOLDER/model_size --tokenizer_path $TARGET_FOLDER/tokenizer.model --win_len 511 --text_file $TEXT_FILE --compression_folder $COMPRESSION_FOLDER --encode_decode 0
 
 ```
 
