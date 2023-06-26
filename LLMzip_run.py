@@ -145,10 +145,7 @@ def main(
         # If the same tokens need to be encoded for any win_len (This has been used for our work)
         # tokens_full = np.array(Encoder.tokenizer.encode(text_input,bos=False,eos=False))[511-win_len:]
         
-        
-
         Encoder.encode_from_tokens(win_len,compression_alg,compressed_file_name,tokens_full=tokens_full,batched_encode=batched_encode)
-    
 
     if decode:
         starter_tokens_in = np.load(compressed_file_name+'_starter_tokens.npy')
