@@ -16,15 +16,12 @@ from fairscale.nn.model_parallel.initialize import initialize_model_parallel
 
 from llama import ModelArgs, Transformer, Tokenizer, LLMzip_encode, LLMzip_decode
 
-
 ### Command to run
 # torchrun --nproc_per_node 1 LLMzip_run.py --ckpt_dir weights/7B --tokenizer_path weights/tokenizer.model 
 # --win_len 511 --text_file *.txt --compression_folder LLMzip_compression   > Log_files/text8_ent1.txt 2>&1
 
 ### For precise reproduction of the paper results set the following options
 # compression_alg - 'both', encode_decode - 0, batched_encode = True, verify_save_decoded = 0, with_context_start = True
-
-
 
 def setup_model_parallel() -> Tuple[int, int]:
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -112,9 +109,9 @@ def main(
     max_batch_size: int = 32,
     compression_alg: str = 'ArithmeticCoding',
     encode_decode: int = 2,
-    batched_encode = False,
-    verify_save_decoded = 2,
-    with_context_start = False
+    batched_encode: bool = False,
+    verify_save_decoded: int = 2,
+    with_context_start: bool = False
 ):
 
     # win_len - The context window length and it cannot exceed the max seq length 512
@@ -145,8 +142,6 @@ def main(
         batched_encode = False 
 
     Encoder,Decoder = load( ckpt_dir, tokenizer_path, local_rank, world_size, max_seq_len, max_batch_size)
-    
-    
 
     os.makedirs(compression_folder,exist_ok=True)
     compressed_file_name = compression_folder + f'/LLMzip_{win_len}' 
@@ -156,8 +151,6 @@ def main(
 
     if encode:
         # Only encoding
-        
-
         tokens_full = np.array(Encoder.tokenizer.encode(text_input,bos=False,eos=False))
 
         if with_context_start:

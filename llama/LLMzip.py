@@ -98,7 +98,8 @@ class LLMzip_encode:
         ranks_list = []
         probs_tok_list = []
 
-
+        n_runs = tokens_full.size-win_size_enc+1
+        
         if not with_context_start:
             tokens_encoded = tokens_full
 
@@ -108,14 +109,12 @@ class LLMzip_encode:
                 ranks,probs_tok = self.encode_batch(tokens_in)
                 ranks_list += [ranks]
                 probs_tok_list += [probs_tok]
-            print("Encoder:")
-            print(tokens_in)
             starter_tokens = None
         else:
             tokens_encoded = tokens_full[win_size:win_size+n_runs] 
             starter_tokens = tokens_full[:win_size] 
 
-        n_runs = tokens_full.size-win_size_enc+1
+        
         
         n_batches = np.ceil(n_runs/bsz).astype(int)
 
@@ -130,8 +129,6 @@ class LLMzip_encode:
             
             
             if (b_ind*bsz*100/n_batches)%10 == 0:
-                if b_ind == 0:
-                    print(tokens_batch)
                 print(f'Encoder: Completed {int(b_ind*bsz*100/n_batches)} %')
             
         ranks_full = np.concatenate(ranks_list,0).squeeze() 
@@ -231,8 +228,6 @@ class LLMzip_decode:
         if starter_tokens is not None:
             total_length += win_size
 
-            
-
         tokens = torch.full((bsz, total_length), self.tokenizer.pad_id).long()
         bos_token = torch.full((bsz, 1), self.tokenizer.bos_id).long().cuda()
 
@@ -269,11 +264,9 @@ class LLMzip_decode:
             if cur_pos >= win_size:
                 prev_pos += 1
 
-            if (cur_pos*100/total_length)%10 == 0:
-                print(f'Decoder: Completed {int(cur_pos*100/total_length)} %')
+                if (prev_pos*100/(total_length-win_size))%10 == 0:
+                    print(f'Decoder: Completed {int(prev_pos*100/(total_length-win_size))} %')
         
-        print("Decoder")
-        print(tokens.tolist()[0][:win_size+20])
         decoded_text = self.tokenizer.decode(tokens.tolist()[0])
             
         bitin.close()
@@ -307,7 +300,7 @@ class LLMzip_decode:
         else:
             total_length += win_size
 
-            ranks_in = np.append(np.zeros((win_size,)),ranks_in)
+            ranks_in = np.append(np.zeros((win_size,),dtype=np.int64),ranks_in)
             ranks = torch.tensor(ranks_in).reshape(bsz,-1).cuda()
 
         bos_token = torch.full((bsz, 1), self.tokenizer.bos_id).long().cuda()
@@ -337,12 +330,10 @@ class LLMzip_decode:
 
             if cur_pos >= win_size:
                 prev_pos += 1
-            
-            if (cur_pos*100/total_length)%10 == 0:
-                print(f'Decoder: Completed {int(cur_pos*100/total_length)} %')
 
-        print("Decoder")
-        print(tokens.tolist()[0][:win_size+20])
+                if (prev_pos*100/(total_length-win_size))%10 == 0:
+                    print(f'Decoder: Completed {int(prev_pos*100/(total_length-win_size))} %')
+
         decoded_text = self.tokenizer.decode(tokens.tolist()[0])
 
         return decoded_text
