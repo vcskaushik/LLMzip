@@ -12,6 +12,8 @@ from AC.arithmeticcoding import *
 import numpy as np
 import pandas as pd
 import zlib
+import sys
+import binascii
 import json
 
 
@@ -71,10 +73,12 @@ class LLMzip_encode:
         compression_alg: str ='ArithmeticCoding',
         compressed_file_name: str = 'LLMzip',
         tokens_full = None,
-        batched_encode = False):
+        batched_encode = False,
+        with_context_start=False):
         
         self.compression_alg = compression_alg
         self.compressed_file_name = compressed_file_name
+        # self.with_context_start
         
         win_size_enc = win_size + 1 # additional 1 is to pass the true token apart from the context of win_size
         
@@ -89,18 +93,34 @@ class LLMzip_encode:
             bsz = self.model.params.max_batch_size
         else:
             bsz = 1 
-            
-        n_runs = tokens_full.size-win_size_enc+1
-#         n_runs = 32
         
-        tokens_encoded = tokens_full[win_size:win_size+n_runs]
-        
-        n_batches = np.ceil(n_runs/bsz).astype(int)
-        
+                
         ranks_list = []
         probs_tok_list = []
 
+
+        if not with_context_start:
+            tokens_encoded = tokens_full
+
+            # Running LLM for the starter tokens
+            for t_ind in range(1,win_size_enc):
+                tokens_in = np.array([[self.tokenizer.bos_id]+tokens_full[:t_ind].tolist()])
+                ranks,probs_tok = self.encode_batch(tokens_in)
+                ranks_list += [ranks]
+                probs_tok_list += [probs_tok]
+            print("Encoder:")
+            print(tokens_in)
+            starter_tokens = None
+        else:
+            tokens_encoded = tokens_full[win_size:win_size+n_runs] 
+            starter_tokens = tokens_full[:win_size] 
+
+        n_runs = tokens_full.size-win_size_enc+1
+        
+        n_batches = np.ceil(n_runs/bsz).astype(int)
+
         for b_ind in range(n_batches):
+
             batch_range_start = b_ind*bsz
             batch_range_stop = np.minimum(n_runs,(b_ind+1)*bsz)
             tokens_batch = np.array([tokens_full[i:i+win_size_enc]for i in range(batch_range_start,batch_range_stop)])
@@ -110,6 +130,8 @@ class LLMzip_encode:
             
             
             if (b_ind*bsz*100/n_batches)%10 == 0:
+                if b_ind == 0:
+                    print(tokens_batch)
                 print(f'Encoder: Completed {int(b_ind*bsz*100/n_batches)} %')
             
         ranks_full = np.concatenate(ranks_list,0).squeeze() 
@@ -127,14 +149,20 @@ class LLMzip_encode:
             ranks_comp = zlib.compress(rank_bytes,9)
             
             self.RZ_file_name = compressed_file_name+'_RZ.txt'
+
             with open(self.RZ_file_name,'wb') as file_out_zip:
                 file_out_zip.write(ranks_comp)
                 
-        self.compute_compression_ratio(tokens_encoded,probs_tok_full)
+        self.compute_compression_ratio(tokens_encoded,probs_tok_full,starter_tokens)
         
     
-    def compute_compression_ratio(self,tokens_encoded,probs_tok):
+    def compute_compression_ratio(self,tokens_encoded,probs_tok,starter_tokens):
         text_encoded = self.tokenizer.decode(tokens_encoded.squeeze().tolist())
+        
+        # if self.starter_tokens != None:
+        #     starter_text_encoded = self.tokenizer.decode(starter_tokens)
+        #     with open(self.compressed_file_name+'_starter_text.txt','w') as text_file:
+        #         text_file.write(text_encoded)
         
         N_T = tokens_encoded.size
         N_C = len(text_encoded)
@@ -145,12 +173,8 @@ class LLMzip_encode:
         df_out['$H_{ub}$'] = [np.sum(-1*np.log2(probs_tok))/N_C]
         
         
-        with open(self.compressed_file_name+'_encoded_text.txt','w') as text_file:
-            text_file.write(text_encoded)
-            
         
-         
-            
+  
         if (self.compression_alg == 'RankZip')or(self.compression_alg =='both'):
             with open(self.RZ_file_name, 'rb') as file_RZ:
                 ranks_compressed_bytes = file_RZ.read()
@@ -193,8 +217,7 @@ class LLMzip_decode:
         win_size,
         starter_tokens,
         total_length: int,
-        compressed_file_name: str = 'LLMzip_AC.txt',
-        decompressed_file_name: str = 'LLMzip_text_AC.txt'):
+        compressed_file_name: str = 'LLMzip_AC.txt'):
         
         
         file_in = open(compressed_file_name, 'rb')
@@ -204,43 +227,59 @@ class LLMzip_decode:
         bsz = 1    # predicts 1 token at a time
         params = self.model.params
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
-        
-        
-        tokens = torch.full((bsz, win_size+total_length), self.tokenizer.pad_id).long()
-        tokens[:,:win_size]=torch.tensor(starter_tokens).long()
-        tokens = tokens.cuda()
-        
-        start_pos = win_size
-        prev_pos = 0
-        
-        cumul = np.zeros(self.model.vocab_size+1, dtype = np.uint64)
-        probs_list = []
-        for cur_pos in range(start_pos, win_size+total_length):
-            logits = self.model.forward(tokens[:, prev_pos:cur_pos], 0) #Position input to LLM is fixed to be 0
-            probs = torch.softmax(logits, dim=-1) 
+
+        if starter_tokens is not None:
+            total_length += win_size
+
             
+
+        tokens = torch.full((bsz, total_length), self.tokenizer.pad_id).long()
+        bos_token = torch.full((bsz, 1), self.tokenizer.bos_id).long().cuda()
+
+        cumul = np.zeros(self.model.vocab_size+1, dtype = np.uint64)
+        probs_list = [] 
+
+        if starter_tokens is None:
+            start_pos = 0
+            prev_pos = -1
+        else:
+            tokens[:,:win_size]=torch.tensor(starter_tokens).long()
+            start_pos = win_size
+            prev_pos = 0
+        tokens = tokens.cuda()
+            
+
+        for cur_pos in range(start_pos, total_length):
+            if prev_pos == -1:
+                logits = self.model.forward(bos_token, 0) 
+                prev_pos += 1
+            elif cur_pos < win_size:
+                logits = self.model.forward(torch.cat((bos_token,tokens[:, prev_pos:cur_pos]),1), 0)
+            else:
+                logits = self.model.forward(tokens[:, prev_pos:cur_pos], 0) #Position input to LLM is fixed to be 0
+            
+            probs = torch.softmax(logits, dim=-1) 
             probs_np = probs.cpu().numpy().reshape((-1,))
+
             probs_list += [probs_np]
             cumul[1:] = np.cumsum(probs_np*10000000 + 1)
             next_token = dec.read(cumul, probs_np.size)
 
             tokens[:,cur_pos] = torch.tensor(next_token).long()
-            prev_pos += 1
-            if (prev_pos*100/total_length)%10 == 0:
-                print(f'Decoder: Completed {int(prev_pos*100/total_length)} %')
+            if cur_pos >= win_size:
+                prev_pos += 1
 
+            if (cur_pos*100/total_length)%10 == 0:
+                print(f'Decoder: Completed {int(cur_pos*100/total_length)} %')
         
-        np.save(decompressed_file_name+'_tokens_ret.npy',tokens.cpu().numpy())
-        
-        
-        
-        decoded_text = self.tokenizer.decode(tokens[:,win_size:].tolist()[0])
-            
-        with open(decompressed_file_name+'_decoded_text.txt','w') as file_out:
-            file_out.write(decoded_text)
+        print("Decoder")
+        print(tokens.tolist()[0][:win_size+20])
+        decoded_text = self.tokenizer.decode(tokens.tolist()[0])
             
         bitin.close()
         file_in.close()
+
+        return decoded_text
         
                   
         
@@ -248,43 +287,62 @@ class LLMzip_decode:
         self,
         win_size,
         starter_tokens,
-        compressed_file_name: str = 'LLMzip_RZ.txt',
-        decompressed_file_name: str = 'LLMzip_text_RZ.txt'):
+        compressed_file_name: str = 'LLMzip_RZ.txt'):
 
         with open(compressed_file_name,'rb') as file_in:
             ranks_compressed = file_in.read()
         
         ranks_decomp = zlib.decompress(ranks_compressed).decode('ascii')
-        ranks = np.fromstring(ranks_decomp,sep=' ',dtype=np.int64)
+        ranks_in = np.fromstring(ranks_decomp,sep=' ',dtype=np.int64)
         
         bsz = 1    # predicts 1 token at a time
         params = self.model.params
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
         
-        total_length = ranks.shape[0]
+        total_length = ranks_in.shape[0]
         
-        tokens = torch.full((bsz, win_size+total_length), self.tokenizer.pad_id).long()
-        tokens[:,:win_size]=torch.tensor(starter_tokens).long()
+        if starter_tokens is None:
+            ranks = torch.tensor(ranks_in).reshape(bsz,-1).cuda()
+
+        else:
+            total_length += win_size
+
+            ranks_in = np.append(np.zeros((win_size,)),ranks_in)
+            ranks = torch.tensor(ranks_in).reshape(bsz,-1).cuda()
+
+        bos_token = torch.full((bsz, 1), self.tokenizer.bos_id).long().cuda()
+        tokens = torch.full((bsz, total_length), self.tokenizer.pad_id).long()
+
+        if starter_tokens is None:
+            start_pos = 0
+            prev_pos = -1
+        else:
+            tokens[:,:win_size]=torch.tensor(starter_tokens).long()
+            start_pos = win_size
+            prev_pos = 0
         tokens = tokens.cuda()
-        ranks = torch.tensor(ranks).reshape(bsz,-1).cuda()
-        
-        start_pos = win_size
-        prev_pos = 0
-        probs_list = []
-        for cur_pos in range(start_pos, win_size+total_length):
-            logits = self.model.forward(tokens[:, prev_pos:cur_pos], 0) #Position input to LLM is fixed to be 0
+
+        for cur_pos in range(start_pos, total_length):
+            if prev_pos == -1:
+                logits = self.model.forward(bos_token, 0)
+                prev_pos += 1
+            elif cur_pos < win_size:
+                logits = self.model.forward(torch.cat((bos_token,tokens[:, prev_pos:cur_pos]),1), 0)
+            else:
+                logits = self.model.forward(tokens[:, prev_pos:cur_pos], 0) #Position input to LLM is fixed to be 0
+            
             probs = torch.softmax(logits, dim=-1) 
-            next_token = gen_next_token(probs,ranks[:,prev_pos:prev_pos+1]) # prev_pos is also current rank index (0:total_length)
-            
-            probs_np = probs.cpu().numpy().reshape((-1,))
-            probs_list += [probs_np]
-            
+            next_token = gen_next_token(probs,ranks[:,cur_pos:cur_pos+1]) 
             tokens[:,cur_pos] = torch.tensor(next_token).long()
-            prev_pos += 1
-            if (prev_pos*100/total_length)%10 == 0:
-                print(f'Decoder: Completed {int(prev_pos*100/total_length)} %')
-        
-        decoded_txt = self.tokenizer.decode(tokens[:,win_size:].tolist()[0])
+
+            if cur_pos >= win_size:
+                prev_pos += 1
             
-        with open(decompressed_file_name+'_decoded_text.txt','w') as file_out:
-            file_out.write(decoded_txt)
+            if (cur_pos*100/total_length)%10 == 0:
+                print(f'Decoder: Completed {int(cur_pos*100/total_length)} %')
+
+        print("Decoder")
+        print(tokens.tolist()[0][:win_size+20])
+        decoded_text = self.tokenizer.decode(tokens.tolist()[0])
+
+        return decoded_text
