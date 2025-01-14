@@ -167,7 +167,7 @@ class LLMzip_encode:
         df_out = {}
         df_out['$N_C$'] = [N_C]
         df_out['$N_T$'] = [N_T]
-        df_out['$H_{ub}$'] = [np.sum(-1*np.log2(probs_tok))/N_C]
+        df_out['$H_{ub}$'] = [str(np.sum(-1*np.log2(probs_tok))/N_C)]
         
         
         
@@ -181,7 +181,7 @@ class LLMzip_encode:
             df_out['Llama+zlib compressed file size'] = [len(ranks_compressed_bytes)*8]
             df_out['$\rho_{LLaMa+Zlib}$'] = [rho_RZ]
             
-        df_out['$\rho_{TbyT}$'] = [np.sum(np.ceil(-1*np.log2(probs_tok)))/N_C]
+        df_out['$\rho_{TbyT}$'] = [str(np.sum(np.ceil(-1*np.log2(probs_tok)))/N_C)]
         
         if (self.compression_alg == 'ArithmeticCoding')or(self.compression_alg =='both'):
             b_ind = 1
